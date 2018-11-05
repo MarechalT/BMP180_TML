@@ -16,6 +16,7 @@
 class BMP180_TML {
 public:
 	BMP180_TML();
+	~BMP180_TML();
 	struct CompParameters {
 		int16_t _AC1;
 		int16_t _AC2;
@@ -29,22 +30,51 @@ public:
 		int16_t _MC;
 		int16_t _MD;
 	};
-private:
+
 	//oversampling setting
 	enum oss {
-		ULP = 0,		//Ultra low Power value 0 Same for Temperature measurement
-		STD = 1,		//Standard
-		HR = 2,			//High Resolution
-		UHR = 3,			//Ultra high resolution
+		ULP = 0,    //Ultra low Power value 0 Same for Temperature measurement
+		STD = 1,    //Standard
+		HR = 2,     //High Resolution
+		UHR = 3,      //Ultra high resolution
 		MAX_VAL
 	};
+
+	static const double delay_oss[];                 // Min Delay between Computing command and reading
+	static const uint8_t BMP180_ADDR = 0x77;        //I²C Address
+	static const uint8_t BMP180_ID = 0x55;          //component ID
+
+	/*!Ensure the communication with the chip.*/
+	bool init();
+	/*! Reset the chip */
+	void reset();
+	/*!Return true if the device has finished computing the value and is ready to be read.*/
+	bool hasValue();
+
+	/*! get the oversampling setting */
+	uint8_t getOss();
+	/*! set the oversampling setting */
+	void setOss(uint8_t ossValue);
+
+	/*!Read the ID.*/
+	uint8_t readID();
+	/*!Read the pressure (Measure + get).*/
+	double readPressure();
+	/*!Read the temperature (Measure + get).*/
+	double readTemperature();
+	/*!Send the order to measure the pressure.*/
+	bool measurePressure();
+	/*!Send the order to measure the temperature.*/
+	bool measureTemperature();
+
+	/*!Get the pressure.*/
+	double getPressure();
+	/*!Get the temperature.*/
+	double getTemperature();
+	CompParameters getCP();
+private:
+
 	//Compensation parameters structure (used in calculations)
-
-	static const double delay_oss[oss::MAX_VAL] { 4.5, 7.5, 13.5, 25.5 };	// Min Delay between Computing command and reading
-	static const int BMP180_ADDR = 0x77;				//I²C Address
-	static const int BMP180_ID = 0x55;					//component ID
-
-	//
 	CompParameters cp;
 	int32_t _up;
 	int32_t _ut;
@@ -52,35 +82,16 @@ private:
 	uint8_t _command;
 	uint8_t _oss_mode;
 
-	/*!Ensure the communication with the chip.*/
-	bool init();
-	/*!Send the order to measure the pressure.*/
-	bool measurePressure();
-	/*!Send the order to measure the temperature.*/
-	bool measureTemperature();
-	/*!Return true if the device has finished computing the value and is ready to be read.*/
-	bool hasValue();
-	/*!Get the pressure.*/
-	double getPressure();
-	/*!Get the temperature.*/
-	double getTemperature();
-	/*!Read the pressure (Measure + get).*/
-	double readPressure();
-	/*!Read the temperature (Measure + get).*/
-	double readTemperature();
-
-	/*!Read the ID.*/
-	uint8_t readID();
 	/*!Read a register value and apply a mask. */
 	uint8_t readRegisterValue(uint8_t reg, uint8_t mask);
 	/*!Read several register value and apply a mask. */
-	uint8_t readRegisterValue(uint8_t reg, uint8_t mask, uint8_t length);
+	uint32_t readRegisterValue(uint8_t reg, uint32_t mask, uint32_t length);
 	/*!Read a register value.*/
 	uint8_t readRegister(uint8_t reg);
 	/*!Read several registers value.*/
 	uint32_t readRegister(uint8_t reg, uint8_t length);
 	/*! Read all compensation parameters.*/
-	CompParameters readCompensationParameters();
+	void readCompensationParameters();
 
 	/*! Get masked shifts.*/
 	uint8_t getMaskShift(uint8_t mask);
@@ -94,12 +105,6 @@ private:
 
 	/*! Set all compensation registers to 0 */
 	void resetCompensationParameters();
-	/*! Reset the chip */
-	void reset();
-	/*! get the oversampling setting */
-	uint8_t getOss();
-	/*! set the oversampling setting */
-	void setOss(uint8_t ossValue);
 
 	/*! All available registers that will be used for measuring and setting purposes */
 	enum BMP180_Registers {
@@ -142,6 +147,10 @@ private:
 		BMP180_CMD_RESET = 0xB6,				//Reset command
 	};
 
+	/*! Get the value of masked bits. */
+	template<class T> T getMaskedBits(T reg, T mask) {
+		return ((reg & mask) >> getMaskShift(mask));
+	}
+	;
 };
-
 #endif

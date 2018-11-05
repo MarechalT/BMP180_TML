@@ -7,6 +7,10 @@
 
 // include this library's description file
 #include "BMP180_TML.h"
+#include <math.h>
+#include <Arduino.h>
+
+const double BMP180_TML::delay_oss[] = { 4.5, 7.5, 13.5, 25.5 };
 
 BMP180_TML::BMP180_TML() :
 		_command(0x00), _oss_mode(BMP180_TML::UHR), _up(0), _ut(0), _B5(0) {
@@ -19,7 +23,7 @@ BMP180_TML::~BMP180_TML() {
 bool BMP180_TML::init() {
 	if (readID() != BMP180_TML::BMP180_ID)
 		return false;
-	cp = readCompensationParameters();
+	readCompensationParameters();
 	return true;
 }
 
@@ -28,19 +32,25 @@ uint8_t BMP180_TML::readID() {
 }
 
 uint8_t BMP180_TML::readRegisterValue(uint8_t reg, uint8_t mask) {
-	return ((reg & mask) >> getMaskShift(mask));
+	return getMaskedBits(readRegister(reg), mask);
 }
-uint8_t BMP180_TML::readRegisterValue(uint8_t reg, uint8_t mask, uint8_t length) {
-	return ((readRegister(reg, length) & mask) >> getMaskShift(mask));
+uint32_t BMP180_TML::readRegisterValue(uint8_t reg, uint32_t mask, uint32_t length) {
+	return getMaskedBits(readRegister(reg, length), mask);
 }
 
 uint32_t BMP180_TML::readRegister(uint8_t reg, uint8_t length) {
 	if (length > 4)
 		return 0L;
 	uint32_t data = 0L;
+
+	Wire.beginTransmission(BMP180_ADDR);
+	Wire.write(reg);
+	Wire.endTransmission(false);
+	Wire.requestFrom(BMP180_ADDR, static_cast<uint8_t>(length));
+
 	for (uint8_t i = 0; i < length; i++) {
 		data <<= 8;
-		data |= static_cast<uint32_t>(readRegister(reg));
+		data |= Wire.read();
 	}
 	return data;
 }
@@ -50,8 +60,6 @@ uint8_t BMP180_TML::readRegister(uint8_t reg) {
 	Wire.write(reg);
 	Wire.endTransmission(false);
 	Wire.requestFrom(BMP180_ADDR, static_cast<uint8_t>(1));
-#endif
-
 	return Wire.read();
 }
 
@@ -94,7 +102,7 @@ uint8_t BMP180_TML::setMaskedBits(uint8_t reg, uint8_t mask, uint8_t value) {
 	return ((value << getMaskShift(mask)) & mask) | reg;
 }
 
-BMP180_TML::CompParameters BMP180_TML::readCompensationParameters() {
+void BMP180_TML::readCompensationParameters() {
 	resetCompensationParameters();
 	cp._AC1 = static_cast<int16_t>(readRegisterValue(BMP180_REG_CP_AC1, BMP180_MASK_CP, 2));
 	cp._AC2 = static_cast<int16_t>(readRegisterValue(BMP180_REG_CP_AC2, BMP180_MASK_CP, 2));
@@ -107,24 +115,25 @@ BMP180_TML::CompParameters BMP180_TML::readCompensationParameters() {
 	cp._MB = static_cast<int16_t>(readRegisterValue(BMP180_REG_CP_MB, BMP180_MASK_CP, 2));
 	cp._MC = static_cast<int16_t>(readRegisterValue(BMP180_REG_CP_MC, BMP180_MASK_CP, 2));
 	cp._MD = static_cast<int16_t>(readRegisterValue(BMP180_REG_CP_MD, BMP180_MASK_CP, 2));
-	return cp;
 }
 
 bool BMP180_TML::measurePressure() {
 	//check if measurement in progress:
-	if (readRegisterValue(BMP180_REG_OUTPUT, BMP180_MASK_SCO))
+	if (readRegisterValue(BMP180_REG_MEASUREMENT_CONTROL, BMP180_MASK_SCO))
 		return false;
 	_command = BMP180_CMD_PRESSURE;
-	writeRegister(BMP180_REG_MEASUREMENT_CONTROL, (_oss_mode << 6) | _command);
+	writeRegisterValue(BMP180_REG_MEASUREMENT_CONTROL, BMP180_MASK_OSS | BMP180_MASK_SCO | BMP180_MASK_MEASUREMENT_CONTROL,
+			(_oss_mode << 6) | _command);
 	return true;
 }
 
 bool BMP180_TML::measureTemperature() {
 	//check if measurement in progress:
-	if (readRegisterValue(BMP180_REG_OUTPUT, BMP180_MASK_SCO))
+	if (readRegisterValue(BMP180_REG_MEASUREMENT_CONTROL, BMP180_MASK_SCO))
 		return false;
 	_command = BMP180_CMD_TEMPERATURE;
-	writeRegister(BMP180_REG_MEASUREMENT_CONTROL, _command);
+	writeRegisterValue(BMP180_REG_MEASUREMENT_CONTROL, BMP180_MASK_SCO | BMP180_MASK_MEASUREMENT_CONTROL, _command);
+
 	return true;
 }
 
@@ -144,7 +153,7 @@ double BMP180_TML::getPressure() {
 	int32_t pressure = 0;
 	int32_t B6 = _B5 - 4000;
 	int32_t X1 = (static_cast<int32_t>(cp._B2) * ((B6 * B6) >> 12)) >> 11;
-	int32_t X2 = (static_cast<int32_t>(cp._AC3) * B6) >> 11;
+	int32_t X2 = (static_cast<int32_t>(cp._AC2) * B6) >> 11;
 	int32_t X3 = X1 + X2;
 	int32_t B3 = ((((static_cast<int32_t>(cp._AC1) << 2) + X3) << _oss_mode) + 2) >> 2;
 	X1 = (static_cast<int32_t>(cp._AC3) * B6) >> 13;
@@ -174,7 +183,7 @@ double BMP180_TML::readPressure() {
 	if (!measurePressure())
 		return NAN;
 	do {
-		delay(delay_oss[_oss_mode]);
+		delay(BMP180_TML::delay_oss[_oss_mode]);
 	} while (!hasValue());
 	return getPressure();
 }
@@ -209,4 +218,8 @@ bool BMP180_TML::hasValue() {
 void BMP180_TML::reset() {
 	_command = BMP180_CMD_RESET;
 	writeRegister(BMP180_REG_RESET, _command);
+}
+
+BMP180_TML::CompParameters BMP180_TML::getCP() {
+	return cp;
 }
